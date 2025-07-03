@@ -1,0 +1,119 @@
+version: '3.8'
+
+services:
+  namenode:
+    image: apache/hadoop:3
+    hostname: namenode
+    command: ["hdfs", "namenode"]
+    ports:
+      - 9870:9870
+      - 9000:9000
+    env_file:
+      - ./hadoop.env
+    environment:
+      ENSURE_NAMENODE_DIR: "/tmp/hadoop-root/dfs/name"
+    volumes:
+      - ./data/namenode:/tmp/hadoop-root/dfs/name
+    networks:
+      - hive-network
+
+  datanode:
+    image: apache/hadoop:3
+    command: ["hdfs", "datanode"]
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - ./data/datanode:/tmp/hadoop-root/dfs/data
+    networks:
+      - hive-network
+    depends_on:
+      - namenode
+
+  resourcemanager:
+    image: apache/hadoop:3
+    hostname: resourcemanager
+    command: ["yarn", "resourcemanager"]
+    ports:
+      - 8088:8088
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - ./data/resourcemanager:/tmp/hadoop-root/logs
+    networks:
+      - hive-network
+    depends_on:
+      - namenode
+      - datanode
+
+  nodemanager:
+    image: apache/hadoop:3
+    command: ["yarn", "nodemanager"]
+    env_file:
+      - ./hadoop.env
+    volumes:
+      - ./data/nodemanager:/tmp/hadoop-root/logs
+    networks:
+      - hive-network
+    depends_on:
+      - resourcemanager
+
+  postgres:
+    image: postgres:13
+    hostname: postgres
+    environment:
+      POSTGRES_USER: hive
+      POSTGRES_PASSWORD: hive
+      POSTGRES_DB: metastore
+    ports:
+      - 5432:5432
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    networks:
+      - hive-network
+
+  hive-metastore:
+    image: apache/hive:4.0.0
+    hostname: hive-metastore
+    environment:
+      SERVICE_NAME: metastore
+      DB_DRIVER: postgres
+      SERVICE_OPTS: "-Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://postgres:5432/metastore -Djavax.jdo.option.ConnectionUserName=hive -Djavax.jdo.option.ConnectionPassword=hive"
+    ports:
+      - 9083:9083
+    depends_on:
+      - postgres
+      - namenode
+      - datanode
+    networks:
+      - hive-network
+
+  hiveserver2:
+    image: apache/hive:4.0.0
+    hostname: hiveserver2
+    environment:
+      SERVICE_NAME: hiveserver2
+      SERVICE_OPTS: "-Dhive.metastore.uris=thrift://hive-metastore:9083"
+      IS_RESUME: "true"
+    ports:
+      - 10000:10000
+      - 10002:10002
+    depends_on:
+      - hive-metastore
+    networks:
+      - hive-network
+
+  hive-webhcat:
+    image: apache/hive:4.0.0
+    hostname: hive-webhcat
+    environment:
+      SERVICE_NAME: webhcat
+    ports:
+      - 50111:50111
+    depends_on:
+      - hiveserver2
+    networks:
+      - hive-network
+
+networks:
+  hive-network:
+    driver: bridge
